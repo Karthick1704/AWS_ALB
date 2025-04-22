@@ -1,0 +1,40 @@
+version: 0.2
+
+env:
+  variables:
+    # NOTE: Define these environment variables in the CodeBuild project settings
+    # AWS_ACCOUNT_ID: "YOUR_ACCOUNT_ID" # Defined in CodeBuild
+    # AWS_DEFAULT_REGION: "YOUR_REGION" # Defined in CodeBuild
+    # IMAGE_REPO_NAME: "my-web-app" # Defined in CodeBuild
+    # IMAGE_TAG: "latest" # Calculated in pre_build
+    CONTAINER_NAME: "my-web-app-container" # Check this matches Task Definition
+
+phases:
+  pre_build:
+    commands:
+      - echo Logging in to Amazon ECR...
+      # Use environment variables set in CodeBuild project
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+      - REPOSITORY_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME
+      - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+      - IMAGE_TAG=${COMMIT_HASH:=latest} # Use commit hash as tag, fallback to latest
+  build:
+    commands:
+      - echo Build started on `date`
+      - echo Building the Docker image...
+      - docker build -t $REPOSITORY_URI:$IMAGE_TAG .
+      - docker tag $REPOSITORY_URI:$IMAGE_TAG $REPOSITORY_URI:latest # Also tag as latest
+  post_build:
+    commands:
+      - echo Build completed on `date`
+      - echo Pushing the Docker images...
+      - docker push $REPOSITORY_URI:$IMAGE_TAG
+      - docker push $REPOSITORY_URI:latest
+      - echo Writing image definitions file...
+      # This file is used by CodePipeline ECS Deploy action
+      - printf '[{"name":"%s","imageUri":"%s"}]' $CONTAINER_NAME $REPOSITORY_URI:$IMAGE_TAG > imagedefinitions.json
+
+artifacts:
+  files:
+     # List the file produced in post_build
+    - imagedefinitions.json
